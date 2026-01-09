@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Calculadora Gráfica Personalizável</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background-color: #121212; color: #eee; text-align: center; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; background: #1e1e1e; padding: 20px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        
+        canvas { background-color: #fff; border-radius: 4px; width: 100%; height: 500px; cursor: crosshair; }
+
+        .input-area { margin-top: 20px; display: flex; gap: 10px; justify-content: center; }
+        
+        input[type="text"] {
+            padding: 15px; font-size: 18px; width: 60%; border-radius: 5px; border: none; outline: none;
+            background: #333; color: #0f0; font-family: 'Courier New', monospace; font-weight: bold;
+        }
+
+        button {
+            padding: 15px 30px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold;
+        }
+        button:hover { background: #0056b3; }
+
+        .dicas { margin-top: 15px; font-size: 14px; color: #888; text-align: left; background: #252525; padding: 10px; border-radius: 5px; }
+        code { background: #444; padding: 2px 5px; border-radius: 3px; color: #ff9; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>📉 Plotter Livre C+Wasm</h1>
+        <canvas id="meuGrafico" width="800" height="500"></canvas>
+
+        <div class="input-area">
+            <input type="text" id="formulaInput" placeholder="Digite ex: x*x ou s(x)*10" value="s(x)*x">
+            <button onclick="plotar()">PLOTAR GRÁFICO</button>
+        </div>
+
+        <div class="dicas">
+            <strong>Como usar:</strong><br>
+            • Variável: <code>x</code><br>
+            • Operadores: <code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>^</code> (potência)<br>
+            • Funções (use parênteses): <code>s(...)</code> seno, <code>c(...)</code> cosseno, <code>t(...)</code> tangente, <code>q(...)</code> raiz quadrada.<br>
+            • Exemplo legal: <code>s(x)*x</code> ou <code>x^2/10</code>
+        </div>
+    </div>
+
+    <script>
+        let wasm = null;
+        const canvas = document.getElementById('meuGrafico');
+        const ctx = canvas.getContext('2d');
+        
+        // Ajustes de Visualização
+        const SCALE = 40; 
+        const CENTER_X = canvas.width / 2;
+        const CENTER_Y = canvas.height / 2;
+
+        fetch('math.wasm')
+            .then(res => res.arrayBuffer())
+            .then(bytes => WebAssembly.instantiate(bytes))
+            .then(results => {
+                wasm = results.instance.exports;
+                plotar(); // Plota o valor padrão ao carregar
+            });
+
+        function desenharEixos() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            ctx.strokeStyle = "#ccc";
+            ctx.lineWidth = 1;
+            ctx.moveTo(0, CENTER_Y); ctx.lineTo(canvas.width, CENTER_Y); // X
+            ctx.moveTo(CENTER_X, 0); ctx.lineTo(CENTER_X, canvas.height); // Y
+            ctx.stroke();
+        }
+
+        function enviarFormulaParaC(texto) {
+            // Remove espaços para facilitar a vida do parser em C
+            texto = texto.replace(/\s/g, ''); 
+
+            // Loop para enviar caractere por caractere para a memória do C
+            for (let i = 0; i < texto.length; i++) {
+                // charCodeAt pega o código ASCII da letra
+                wasm.set_formula_char(i, texto.charCodeAt(i));
+            }
+            // Envia o código 0 no final para avisar que a string acabou
+            wasm.set_formula_char(texto.length, 0);
+        }
+
+        function plotar() {
+            if (!wasm) return;
+
+            const formulaTexto = document.getElementById('formulaInput').value;
+            
+            // 1. Envia o texto do input para o "cérebro" em C
+            enviarFormulaParaC(formulaTexto);
+
+            // 2. Prepara o desenho
+            desenharEixos();
+            ctx.beginPath();
+            ctx.strokeStyle = "#00ff00";
+            ctx.lineWidth = 2;
+
+            // 3. Loop pixel a pixel
+            for (let pixelX = 0; pixelX < canvas.width; pixelX++) {
+                // Converte Pixel da tela -> Valor de X Matemático
+                let mathX = (pixelX - CENTER_X) / SCALE;
+                
+                // PERGUNTA AO C: "Quanto vale sua fórmula quando X é mathX?"
+                let mathY = wasm.calcular_formula(mathX);
+
+                // Converte Valor de Y Matemático -> Pixel da tela
+                let pixelY = CENTER_Y - (mathY * SCALE);
+
+                // Evita desenhar linhas infinitas (quando Y é muito grande)
+                if (mathY > 100 || mathY < -100) {
+                    ctx.stroke(); ctx.beginPath(); continue;
+                }
+
+                if (pixelX === 0) ctx.moveTo(pixelX, pixelY);
+                else ctx.lineTo(pixelX, pixelY);
+            }
+            ctx.stroke();
+        }
+    </script>
+</body>
+</html>
